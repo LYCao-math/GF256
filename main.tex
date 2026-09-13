@@ -1,0 +1,311 @@
+% Compile with pdfLaTeX or upload to Overleaf.
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{geometry}
+\usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage{listings}
+\usepackage{hyperref}
+\geometry{margin=1in}
+\hypersetup{colorlinks=true,linkcolor=black,citecolor=black,urlcolor=blue}
+\lstset{basicstyle=\ttfamily\small,breaklines=true,frame=single,columns=fullflexible}
+
+\title{Mathematical Foundations of AES and\\
+Finite-Field-Based Master-Key Preprocessing}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This report studies several algebraic structures used in AES, beginning with
+the construction of $\mathrm{GF}(256)$ and polynomial arithmetic over
+$\mathrm{GF}(2)$. It then explains multiplicative inversion, construction of
+the AES S-box, AES-128 key expansion, and the standard round transformations.
+Finally, it presents an exploratory master-key preprocessing construction
+based on the trace and norm of the quadratic extension
+$\mathrm{GF}(2^{16})/\mathrm{GF}(2^8})$, a permutation polynomial, and a
+full-rank linear transformation. The accompanying Python implementation
+implements the AES procedure represented by the original project code; the
+additional preprocessing construction is discussed mathematically but is not
+silently substituted for the standard AES key schedule.
+\end{abstract}
+
+\section{Construction of $\mathrm{GF}(256)$}
+
+Let $L$ be a field of characteristic $2$. For every $a\in L$,
+\[
+a+a=0.
+\]
+Thus addition has the same XOR behavior as binary addition without carry.
+
+The field $\mathrm{GF}(256)$ can be constructed as
+\[
+K=\mathrm{GF}(2)[x]/(p(x)),
+\]
+where
+\[
+p(x)=x^8+x^4+x^3+x+1.
+\]
+The polynomial is irreducible over $\mathrm{GF}(2)$, so $(p(x))$ is maximal
+and $K$ is a field. A basis is
+\[
+\{1,x,x^2,x^3,x^4,x^5,x^6,x^7\}.
+\]
+Consequently,
+\[
+|K|=2^8=256.
+\]
+
+Each byte corresponds to one polynomial in this basis. Multiplication is
+ordinary polynomial multiplication over $\mathrm{GF}(2)$ followed by
+reduction modulo $p(x)$.
+
+\section{Polynomial Arithmetic and Multiplicative Inversion}
+
+The ring $\mathrm{GF}(2)[x]$ is Euclidean. For
+$f(x)$ satisfying
+\[
+\gcd(f(x),p(x))=1,
+\]
+the extended Euclidean algorithm gives
+\[
+u(x)f(x)+v(x)p(x)=1.
+\]
+Modulo $p(x)$,
+\[
+u(x)f(x)\equiv1\pmod{p(x)},
+\]
+so $u(x)$ represents the inverse of $f(x)$ in $K$.
+
+The Python implementation in \texttt{src/aes.py} represents polynomials as
+integers whose binary digits are their coefficients. XOR implements addition
+over $\mathrm{GF}(2)$.
+
+\section{The AES S-box}
+
+The standard AES S-box is constructed from multiplicative inversion in
+$\mathrm{GF}(2^8)$ followed by an affine transformation. For an input
+$a\neq0$, first compute $a^{-1}$ in $\mathrm{GF}(2^8)$; for $a=0$, the inverse
+is defined as $0$ for the S-box construction. The affine transformation uses
+the constant
+\[
+c=\texttt{0x63}.
+\]
+
+The implementation generates all 256 S-box values programmatically rather
+than storing a lookup table.
+
+\section{AES-128 Key Expansion}
+
+A 16-byte master key is divided into four words. The AES-128 expansion
+generates 44 words, corresponding to 11 round keys. Every fourth word is
+processed using \texttt{RotWord}, \texttt{SubWord}, and the appropriate round
+constant:
+\[
+w_i=w_{i-4}\oplus \operatorname{Temp},
+\]
+where the transformation of $\operatorname{Temp}$ includes the S-box and
+the round constant.
+
+The round constants used by the implementation are
+\[
+01,02,04,08,10,20,40,80,1B,36.
+\]
+
+\section{AES Round Transformations}
+
+A 16-byte block is represented as a $4\times4$ state matrix in column-major
+order.
+
+\subsection{SubBytes}
+
+Each state byte is replaced using the AES S-box.
+
+\subsection{ShiftRows}
+
+Row $0$ is unchanged, while rows $1$, $2$, and $3$ are shifted left by
+$1$, $2$, and $3$ bytes, respectively.
+
+\subsection{MixColumns}
+
+Each column is multiplied over $\mathrm{GF}(256)$ by
+\[
+M=
+\begin{pmatrix}
+02&03&01&01\\
+01&02&03&01\\
+01&01&02&03\\
+03&01&01&02
+\end{pmatrix}.
+\]
+
+The inverse transformation uses
+\[
+M^{-1}=
+\begin{pmatrix}
+0E&0B&0D&09\\
+09&0E&0B&0D\\
+0D&09&0E&0B\\
+0B&0D&09&0E
+\end{pmatrix}.
+\]
+
+\subsection{AddRoundKey}
+
+The state and round key are combined bytewise using XOR.
+
+For AES-128, rounds $1$ through $9$ apply SubBytes, ShiftRows, MixColumns,
+and AddRoundKey. The tenth round omits MixColumns.
+
+\section{Padding and Encryption Mode}
+
+The accompanying implementation applies PKCS\#7 padding and encrypts each
+16-byte block independently. Thus the implemented mode is ECB.
+
+ECB is retained because it reflects the structure of the original project
+code. It is not recommended for production use because repeated plaintext
+blocks produce repeated ciphertext blocks.
+
+\section{Proposed Master-Key Preprocessing}
+
+The original mathematical proposal explores the extension
+\[
+\mathrm{GF}(2^{16})/\mathrm{GF}(2^8).
+\]
+Let $\theta$ satisfy
+\[
+\theta^2+\theta=33.
+\]
+Represent a paired pair of $\mathrm{GF}(2^8)$ elements as
+\[
+\beta=a+b\theta.
+\]
+
+The Frobenius automorphism maps $\theta$ to its conjugate $\theta+1$.
+Therefore,
+\[
+\begin{aligned}
+\operatorname{Tr}_{\mathrm{GF}(2^{16})/\mathrm{GF}(2^8)}(\beta)
+&=\beta+\beta^{2^8}\\
+&=(a+b\theta)+(a+b(\theta+1))\\
+&=b.
+\end{aligned}
+\]
+Hence
+\[
+\boxed{
+\operatorname{Tr}_{\mathrm{GF}(2^{16})/\mathrm{GF}(2^8)}(\beta)=b.
+}
+\]
+
+Similarly,
+\[
+\begin{aligned}
+N_{\mathrm{GF}(2^{16})/\mathrm{GF}(2^8)}(\beta)
+&=\beta\beta^{2^8}\\
+&=(a+b\theta)(a+b(\theta+1))\\
+&=a^2+ab+b^2(\theta^2+\theta)\\
+&=a^2+ab+33b^2.
+\end{aligned}
+\]
+Thus
+\[
+\boxed{
+N_{\mathrm{GF}(2^{16})/\mathrm{GF}(2^8)}(\beta)
+=a^2+ab+33b^2.
+}
+\]
+
+The proposed nonlinear transformation is
+\[
+v_i=u_i^7+t_i u_i+n_i+C_i,
+\]
+where
+\[
+t_i=\operatorname{Tr}(u_i),\qquad
+n_i=N(u_i).
+\]
+Since
+\[
+\gcd(7,2^{16}-1)=1,
+\]
+the map
+\[
+u\mapsto u^7
+\]
+is a permutation of $\mathrm{GF}(2^{16})$. A full-rank matrix
+\[
+M\in M_8(\mathrm{GF}(256))
+\]
+can then be used for a linear mixing step
+\[
+V\mapsto MV.
+\]
+
+This construction is an experimental proposal. It is not part of the
+standard AES specification, and its cryptographic security would require
+separate analysis.
+
+\section{Implementation and Reproducibility}
+
+The Python implementation is organized as follows:
+\begin{itemize}
+    \item \texttt{poly\_degree}: polynomial degree;
+    \item \texttt{F2\_mult}: polynomial multiplication over $\mathrm{GF}(2)$;
+    \item \texttt{F2\_divi}: polynomial division with remainder;
+    \item \texttt{GF256\_mult}: multiplication in $\mathrm{GF}(256)$;
+    \item \texttt{GF256\_inve}: multiplicative inversion;
+    \item \texttt{generate\_sbox}: generation of the AES S-box;
+    \item \texttt{key\_expansion}: AES-128 key expansion;
+    \item \texttt{sub\_bytes}, \texttt{shift\_rows}, \texttt{mix\_columns},
+          \texttt{add\_round\_key}: AES round transformations;
+    \item \texttt{AES\_encrypt}: block encryption with PKCS\#7 padding;
+    \item \texttt{AES\_decrypt}: inverse AES transformation.
+\end{itemize}
+
+The example uses
+\[
+K=\texttt{000102030405060708090a0b0c0d0e0f}
+\]
+and the plaintext ``mathematical science''. Running
+\texttt{run\_example.py} verifies that encryption followed by decryption
+recovers the original plaintext.
+
+\section{Discussion and Limitations}
+
+The project is based on undergraduate algebra, finite-field theory, and the
+study of AES. The standard AES implementation and the additional mathematical
+proposal should be distinguished clearly: the former is an implementation of
+the AES procedure represented by the original code, whereas the latter is an
+experimental construction for further investigation.
+
+The proposed preprocessing was not fully integrated into the original Python
+encryption pipeline. Consequently, this repository does not claim that the
+modified construction is equivalent to, or as secure as, standard AES.
+
+\section{AI Assistance}
+
+AI assistance was used for some complex implementation details, including
+polynomial division, multiplicative inversion, and linear transformations.
+It was also used to identify certain implementation issues. The decryption
+procedure was developed primarily through function reuse and derivation of
+the corresponding inverse operations.
+
+\begin{thebibliography}{9}
+
+\bibitem{nie}
+L. Nie and S. Ding,
+\emph{An Introduction to Algebra},
+Higher Education Press, Beijing, 2000.
+
+\bibitem{feng}
+R. Feng,
+\emph{Foundations of Finite Fields},
+Higher Education Press, Beijing, 2024.
+
+\end{thebibliography}
+
+\end{document}
